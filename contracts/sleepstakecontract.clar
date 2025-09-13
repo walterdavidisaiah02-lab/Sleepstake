@@ -338,3 +338,103 @@
     (ok true)
   )
 )
+;; read only functions
+
+;; Get goal details
+(define-read-only (get-goal (goal-id uint))
+  (map-get? goals goal-id)
+)
+
+;; Get user's goals
+(define-read-only (get-user-goal-status (user principal) (goal-id uint))
+  (map-get? user-goals {user: user, goal-id: goal-id})
+)
+
+;; Get accountability group info
+(define-read-only (get-group-info (group-id uint))
+  (map-get? accountability-groups group-id)
+)
+
+;; Get group member info
+(define-read-only (get-group-member (group-id uint) (member principal))
+  (map-get? group-members {group-id: group-id, member: member})
+)
+
+;; Get biometric data
+(define-read-only (get-biometric-data (user principal) (timestamp uint))
+  (map-get? biometric-data {user: user, timestamp: timestamp})
+)
+
+;; Get platform stats
+(define-read-only (get-platform-stats)
+  {
+    total-staked: (var-get total-staked),
+    platform-treasury: (var-get platform-treasury),
+    next-goal-id: (var-get next-goal-id),
+    next-group-id: (var-get next-group-id)
+  }
+)
+
+;; Get healthcare provider info
+(define-read-only (get-provider-info (provider principal))
+  (map-get? healthcare-providers provider)
+)
+
+;; Get provider-user link
+(define-read-only (get-provider-link (provider principal) (user principal))
+  (map-get? provider-user-link {provider: provider, user: user})
+)
+
+;; Check if goal is eligible for reward
+(define-read-only (is-goal-eligible-for-reward (goal-id uint))
+  (match (map-get? goals goal-id)
+    goal (and 
+           (get completed goal)
+           (get verified goal)
+           (not (get reward-claimed goal)))
+    false
+  )
+)
+
+;; Calculate potential reward for goal
+(define-read-only (calculate-reward (goal-id uint))
+  (match (map-get? goals goal-id)
+    goal (let 
+           (
+             (reward-amount (/ (* (get stake-amount goal) REWARD_MULTIPLIER) u100))
+             (platform-fee (/ (* reward-amount PLATFORM_FEE_PERCENT) u100))
+           )
+           (some (- reward-amount platform-fee)))
+    none
+  )
+)
+
+;; private functions
+
+;; Internal function to forfeit stake on goal failure
+(define-private (forfeit-stake (goal-id uint))
+  (match (map-get? goals goal-id)
+    goal (let 
+           (
+             (stake-amount (get stake-amount goal))
+             (platform-fee (/ (* stake-amount PLATFORM_FEE_PERCENT) u100))
+             (remaining-stake (- stake-amount platform-fee))
+           )
+           ;; Add to platform treasury
+           (var-set platform-treasury (+ (var-get platform-treasury) platform-fee))
+           ;; Distribute remaining stake to reward pool
+           (var-set total-staked (- (var-get total-staked) stake-amount))
+           true)
+    false
+  )
+)
+
+;; Calculate group reward distribution
+(define-private (calculate-group-rewards (group-id uint) (total-completed-goals uint))
+  (match (map-get? accountability-groups group-id)
+    group (if (> total-completed-goals u0)
+             (/ (get total-stake group) total-completed-goals)
+             u0)
+    u0
+  )
+)
